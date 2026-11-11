@@ -1,0 +1,275 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Chủ trọ
+model Landlord {
+  id        String   @id @default(uuid())
+  email           String   @unique
+  password        String
+  name            String
+  phone           String?
+  bankName        String?  // VD: "MB", "VCB", "Techcombank"
+  bankAccount     String?  // Số tài khoản
+  bankAccountName String?  // Tên chủ tài khoản
+
+  // Settings & Configuration
+  defaultElectricityPrice Int? @default(3500)
+  defaultWaterPrice       Int? @default(20000)
+  invoiceCreationDay      Int? @default(1)
+  paymentDeadlineDays     Int? @default(5)
+  telegramChatId          String?  // Dùng để gửi thông báo về bot Telegram
+
+  rooms           Room[]
+  tenants         Tenant[]
+  notices         Notice[]
+  properties      Property[]
+  transactions    Transaction[]
+  auditLogs       AuditLog[]
+  createdAt       DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Property {
+  id          String   @id @default(uuid())
+  name        String   // VD: "Khu trọ A"
+  address     String   // Địa chỉ
+  description String?
+  landlordId  String
+  landlord    Landlord @relation(fields: [landlordId], references: [id])
+  rooms       Room[]
+  notices     Notice[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Phòng trọ
+model Room {
+  id         String     @id @default(uuid())
+  name       String     // VD: "Phòng 101"
+  price      Float      // Giá thuê cơ bản
+  area       Float?     // Diện tích (m2)
+  maxCapacity Int?      // Sức chứa tối đa (người)
+  status     RoomStatus @default(AVAILABLE)
+  landlordId String
+  landlord   Landlord   @relation(fields: [landlordId], references: [id])
+  propertyId String?
+  property   Property?  @relation(fields: [propertyId], references: [id])
+  assets     Json?      @default("[]") // Danh sách tài sản (VD: [{"name": "Máy lạnh", "status": "Tốt"}])
+  contracts  Contract[]
+  maintenanceRequests MaintenanceRequest[]
+  notices    Notice[]
+  transactions Transaction[]
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+}
+
+// Khách thuê (Tenant)
+model Tenant {
+  id         String     @id @default(uuid())
+  fullName   String
+  cccd       String     @unique // Căn cước công dân
+  phone      String
+  email      String?
+  landlordId String
+  landlord   Landlord   @relation(fields: [landlordId], references: [id])
+
+  // Thông tin mở rộng
+  avatar      String?   @db.Text
+  idCardFront String?   @db.Text
+  idCardBack  String?   @db.Text
+  address     String?
+  dob         DateTime?
+  gender      String?
+
+  // Phân loại
+  contracts  Contract[] // Đứng tên hợp đồng
+  roommateOfContractId String?
+  roommateOfContract   Contract? @relation("ContractRoommates", fields: [roommateOfContractId], references: [id])
+
+  maintenanceRequests MaintenanceRequest[]
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+}
+
+// Hợp đồng
+model Contract {
+  id              String           @id @default(uuid())
+  roomId          String
+  room            Room             @relation(fields: [roomId], references: [id])
+  tenantId        String
+  tenant          Tenant           @relation(fields: [tenantId], references: [id])
+  startDate       DateTime
+  endDate         DateTime?
+  paymentCycle    Int              @default(1)     // Chu kỳ đóng tiền (tháng)
+  deposit         Float            // Tiền cọc
+  electricityRate Float            @default(3500)  // Giá điện (VNĐ/kWh)
+  waterRate       Float            @default(15000) // Giá nước (VNĐ/m3)
+  customServices  Json?            @default("[]")  // Các dịch vụ thêm (VD: [{"name": "Rác", "amount": 20000}])
+  notes           String?          // Ghi chú hợp đồng
+  invoices        Invoice[]
+  utilityReadings UtilityReading[]
+  isActive        Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  roommates       Tenant[]         @relation("ContractRoommates")
+}
+
+// Chỉ số điện/nước hàng tháng
+model UtilityReading {
+  id              String   @id @default(uuid())
+  contractId      String
+  contract        Contract @relation(fields: [contractId], references: [id])
+  month           Int      // Tháng ghi chỉ số (1-12)
+  year            Int      // Năm ghi chỉ số
+  electricityPrev Float    // Chỉ số điện đầu kỳ (kWh)
+  electricityCurr Float    // Chỉ số điện cuối kỳ (kWh)
+  waterPrev       Float    // Chỉ số nước đầu kỳ (m3)
+  waterCurr       Float    // Chỉ số nước cuối kỳ (m3)
+  imageUrl        String?  @db.Text // Ảnh minh chứng (Base64)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([contractId, month, year]) // Mỗi hợp đồng chỉ có 1 chỉ số/tháng
+}
+
+// Hóa đơn hàng tháng
+model Invoice {
+  id                String        @id @default(uuid())
+  contractId        String
+  contract          Contract      @relation(fields: [contractId], references: [id])
+  invoiceCode       String?       @unique // Mã ngắn dùng cho SePay webhook
+  month             Int
+  year              Int
+  rentAmount        Float         // Tiền thuê phòng
+  electricityAmount Float         @default(0) // Tiền điện
+  waterAmount       Float         @default(0) // Tiền nước
+  customServices    Json?         @default("[]") // Lịch sử các dịch vụ thêm lúc tạo hóa đơn
+  otherAmount       Float         @default(0) // Các khoản khác
+  totalAmount       Float         // Tổng tiền
+  status            InvoiceStatus @default(UNPAID)
+  paidAt            DateTime?     // Thời điểm thanh toán
+  notes             String?       // Ghi chú hóa đơn
+  paymentLink       String?       // Link thanh toán VietQR / MoMo
+  transaction       Transaction?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@unique([contractId, month, year]) // Mỗi hợp đồng chỉ có 1 hóa đơn/tháng
+}
+
+// Yêu cầu bảo trì / sửa chữa
+model MaintenanceRequest {
+  id          String   @id @default(uuid())
+  roomId      String
+  room        Room     @relation(fields: [roomId], references: [id])
+  tenantId    String?  // Có thể null nếu chủ trọ tự tạo
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id])
+  title       String   // VD: "Thay bóng đèn", "Sửa vòi nước"
+  description String?
+  status      MaintenanceStatus @default(PENDING)
+  priority    MaintenancePriority @default(MEDIUM)
+  cost        Float?   // Chi phí sửa chữa (nếu có)
+  imageUrl    String?  @db.Text // Ảnh minh chứng (Base64)
+  resolvedAt  DateTime? // Ngày hoàn thành
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+enum RoomStatus {
+  AVAILABLE
+  RENTED
+  MAINTENANCE
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PAID
+  OVERDUE
+}
+
+enum MaintenanceStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum MaintenancePriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+// Thông báo nội bộ
+model Notice {
+  id          String   @id @default(uuid())
+  title       String
+  content     String
+  isImportant Boolean  @default(false)
+  landlordId  String
+  landlord    Landlord @relation(fields: [landlordId], references: [id])
+  propertyId  String?
+  property    Property? @relation(fields: [propertyId], references: [id])
+  roomId      String?  // Nếu null thì là thông báo toàn khu
+  room        Room?    @relation(fields: [roomId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Lịch sử Giao dịch
+model Transaction {
+  id          String   @id @default(uuid())
+  type        TransactionType
+  amount      Float
+  description String
+  date        DateTime @default(now())
+  landlordId  String
+  landlord    Landlord @relation(fields: [landlordId], references: [id])
+  roomId      String?
+  room        Room?    @relation(fields: [roomId], references: [id])
+  invoiceId   String?  @unique
+  invoice     Invoice? @relation(fields: [invoiceId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  landlordId String
+  landlord   Landlord    @relation(fields: [landlordId], references: [id], onDelete: Cascade)
+  action     AuditAction
+  entityType String
+  entityId   String
+  details    Json?
+  createdAt  DateTime    @default(now())
+
+  @@index([landlordId, createdAt])
+  @@index([entityType, entityId])
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+}
+
+enum AuditAction {
+  ROOM_PRICE_CHANGED
+  CONTRACT_CREATED
+  CONTRACT_TERMINATED
+  CONTRACT_RENEWED
+  INVOICE_PAID
+}

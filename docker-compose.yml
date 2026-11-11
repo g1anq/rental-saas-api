@@ -1,0 +1,12 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: rental_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-root}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in rental-saas-api/.env}"
+      POSTGRES_DB: ${POSTGRES_DB:-rental_saas}
+    ports:
+      - "127.0.0.1:5433:5432"
+    restart: always
