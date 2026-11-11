@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { TenantNotificationsGateway } from './tenant-notifications.gateway.js';
@@ -8,13 +8,19 @@ describe('TenantNotificationsGateway', () => {
   const prisma = { tenant: { findUnique: vi.fn() } };
   let gateway: TenantNotificationsGateway;
   const client = {
-    handshake: { auth: { token: 'valid-token' } },
+    handshake: {
+      headers: {
+        origin: 'http://localhost:3000',
+        cookie: 'rental_session=valid-token',
+      },
+    },
     disconnect: vi.fn(),
     join: vi.fn(),
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv('CORS_ORIGINS', 'http://localhost:3000');
     gateway = new TenantNotificationsGateway(
       jwtService as unknown as JwtService,
       prisma as unknown as PrismaService,
@@ -22,6 +28,10 @@ describe('TenantNotificationsGateway', () => {
     jwtService.verifyAsync.mockResolvedValue({
       sub: 'tenant-1',
       role: 'tenant',
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
     });
     prisma.tenant.findUnique.mockResolvedValue({ id: 'tenant-1' });
   });
@@ -40,7 +50,7 @@ describe('TenantNotificationsGateway', () => {
   it('disconnects clients without a token', async () => {
     const unauthenticatedClient = {
       ...client,
-      handshake: { auth: {} },
+      handshake: { headers: { origin: 'http://localhost:3000' } },
     };
 
     await gateway.handleConnection(unauthenticatedClient as never);
@@ -48,6 +58,24 @@ describe('TenantNotificationsGateway', () => {
     expect(jwtService.verifyAsync).not.toHaveBeenCalled();
     expect(unauthenticatedClient.disconnect).toHaveBeenCalledWith(true);
     expect(unauthenticatedClient.join).not.toHaveBeenCalled();
+  });
+
+  it('disconnects clients from untrusted origins', async () => {
+    const untrustedClient = {
+      ...client,
+      handshake: {
+        headers: {
+          origin: 'https://untrusted.example',
+          cookie: 'rental_session=valid-token',
+        },
+      },
+    };
+
+    await gateway.handleConnection(untrustedClient as never);
+
+    expect(jwtService.verifyAsync).not.toHaveBeenCalled();
+    expect(untrustedClient.disconnect).toHaveBeenCalledWith(true);
+    expect(untrustedClient.join).not.toHaveBeenCalled();
   });
 
   it('disconnects landlord tokens and never joins a tenant room', async () => {

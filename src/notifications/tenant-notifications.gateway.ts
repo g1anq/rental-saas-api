@@ -8,6 +8,8 @@ import {
 import type { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { getAuthCookieToken } from '../auth/auth-cookie.js';
+import { getCorsOrigins } from '../config/cors-origins.js';
 
 type TenantToken = {
   sub: string;
@@ -16,7 +18,9 @@ type TenantToken = {
 
 @WebSocketGateway({
   cors: {
-    origin: process.env.FRONTEND_URL?.split(',') ?? true,
+    origin: (origin, callback) => {
+      callback(null, !origin || getCorsOrigins().includes(origin));
+    },
     credentials: true,
   },
 })
@@ -34,8 +38,15 @@ export class TenantNotificationsGateway
   ) {}
 
   async handleConnection(client: Socket) {
-    const token = client.handshake.auth?.token;
-    if (typeof token !== 'string' || token.length === 0) {
+    const headers = client.handshake?.headers;
+    const origin = headers?.origin;
+    if (!origin || !getCorsOrigins().includes(origin)) {
+      client.disconnect(true);
+      return;
+    }
+
+    const token = getAuthCookieToken(headers?.cookie);
+    if (!token) {
       client.disconnect(true);
       return;
     }

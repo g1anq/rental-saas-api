@@ -4,6 +4,12 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { getJwtSecret } from './jwt-secret.js';
+import type { Request } from 'express';
+import { getAuthCookieToken } from './auth-cookie.js';
+
+function extractAuthCookie(request: Request): string | null {
+  return getAuthCookieToken(request.headers.cookie);
+}
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -12,7 +18,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     config: ConfigService,
   ) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        extractAuthCookie,
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ]),
       ignoreExpiration: false,
       secretOrKey: getJwtSecret(config),
     });
@@ -36,7 +45,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
 
     // We omit password so it's not injected into the request object
-    const { password, ...result } = landlord as any;
+    const { password: _password, ...result } = landlord;
     return { ...result, role: 'landlord' };
   }
 }

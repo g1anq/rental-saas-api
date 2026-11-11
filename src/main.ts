@@ -1,12 +1,21 @@
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import type { NextFunction, Request, Response } from 'express';
 import { AppModule } from './app.module.js';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
 import { rateLimit } from 'express-rate-limit';
 import * as express from 'express';
+import { getCorsOrigins, validateProductionSecurity } from './config/cors-origins.js';
+import { getAuthCookieToken } from './auth/auth-cookie.js';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  validateProductionSecurity();
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const corsOrigins = getCorsOrigins();
+  if (process.env.TRUST_PROXY === 'true') {
+    app.set('trust proxy', 1);
+  }
 
   app.use(
     '/auth',
@@ -25,7 +34,25 @@ async function bootstrap() {
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
   // Cấu hình CORS để NextJS (Frontend) có thể gọi được API
-  app.enableCors();
+  app.enableCors({
+    origin: corsOrigins,
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  });
+
+  app.use((request: Request, response: Response, next: NextFunction) => {
+    const isSafeMethod = ['GET', 'HEAD', 'OPTIONS'].includes(request.method);
+    const origin = request.get('origin');
+    const hasAuthCookie = Boolean(getAuthCookieToken(request.headers.cookie));
+
+    if (isSafeMethod || (origin && corsOrigins.includes(origin)) || (!origin && !hasAuthCookie)) {
+      next();
+      return;
+    }
+
+    response.status(403).json({ message: 'Origin không được phép thực hiện yêu cầu này.' });
+  });
 
   // Bật ValidationPipe toàn cục — validate DTO tự động
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));

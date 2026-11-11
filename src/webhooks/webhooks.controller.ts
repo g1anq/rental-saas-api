@@ -8,7 +8,7 @@ export class WebhooksController {
   @Post('sepay')
   async handleSepayWebhook(
     @Body() body: any,
-    @Headers('Authorization') authHeader: string
+    @Headers('Authorization') _authHeader: string
   ) {
     // In production, verify the Auth Header or API Key from SePay.
     return this.webhooksService.processSepayTransaction(body);

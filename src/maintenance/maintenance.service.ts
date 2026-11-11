@@ -8,7 +8,7 @@ import { MaintenanceStatus, MaintenancePriority } from '@prisma/client';
 export class MaintenanceService {
   constructor(private prisma: PrismaService) {}
 
-  async create(dto: CreateMaintenanceDto, landlordId: string) {
+  async create(dto: CreateMaintenanceDto, _landlordId: string) {
     return this.prisma.maintenanceRequest.create({
       data: {
         title: dto.title,

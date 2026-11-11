@@ -551,7 +551,7 @@ export class InvoicesService {
         );
         if (success) successCount++;
         else failCount++;
-      } catch (error) {
+      } catch {
         failCount++;
       }
     }
